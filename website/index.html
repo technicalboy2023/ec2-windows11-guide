@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EC2 Windows 11 Guide — Reproducible Installation</title>
+<meta name="description" content="Reproduce Windows 11 Pro on AWS EC2 from a fresh Ubuntu 24.04 instance, with verified commands, scripts, backup and troubleshooting.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="progress" id="progress" aria-hidden="true"></div>
+<header class="topbar">
+  <button class="menu-btn" id="menuBtn" aria-label="Toggle navigation">☰</button>
+  <a class="brand" href="#top">EC2 Windows 11 Guide</a>
+  <span class="badge">v1.0 · Tested Nov 2026</span>
+  <div class="top-actions">
+    <input id="search" type="search" placeholder="Search guide… (e.g. RDP, AMI, DiskPart)" aria-label="Search guide">
+    <button id="themeBtn" aria-label="Toggle dark and light mode">☀️ Light</button>
+  </div>
+</header>
+<div class="layout">
+  <aside class="sidebar" id="sidebar" aria-label="Table of contents">
+    <p class="side-title">Contents</p>
+    <nav id="toc">
+      <a href="#overview">Overview</a>
+      <a href="#prereq">1 · Prerequisites</a>
+      <a href="#updates">2 · Updates &amp; packages</a>
+      <a href="#checks">3 · Dependency checks</a>
+      <a href="#install">4 · Install Windows 11</a>
+      <a href="#reboot">5 · Reboot &amp; stages</a>
+      <a href="#rdp">6 · First RDP login</a>
+      <a href="#inside">7 · Inside Windows</a>
+      <a href="#network">8 · Networking &amp; firewall</a>
+      <a href="#services">9 · Services &amp; startup</a>
+      <a href="#security">10 · Security hardening</a>
+      <a href="#backup">11 · Backup &amp; restore</a>
+      <a href="#verify">12 · Verification checklist</a>
+      <a href="#troubleshoot">13 · Troubleshooting</a>
+      <a href="#remove">14 · Removal &amp; reinstall</a>
+      <a href="#faq">FAQ</a>
+      <a href="#refs">References</a>
+    </nav>
+    <div class="checklist">
+      <p class="side-title">Your progress</p>
+      <label><input type="checkbox" class="step" data-step="prereq"> Prerequisites done</label>
+      <label><input type="checkbox" class="step" data-step="backup"> AMI backup done</label>
+      <label><input type="checkbox" class="step" data-step="install"> Installer prepared</label>
+      <label><input type="checkbox" class="step" data-step="reboot"> Rebooted</label>
+      <label><input type="checkbox" class="step" data-step="rdp"> RDP verified</label>
+      <label><input type="checkbox" class="step" data-step="verify"> Full checklist passed</label>
+      <p id="progressText">0 of 6 steps done</p>
+    </div>
+  </aside>
+  <main class="content" id="top">
+    <section class="hero" data-search="overview windows 11 ec2 ubuntu reinstall">
+      <p class="eyebrow">REPRODUCIBLE · AWS EC2 · UBUNTU 24.04 → WINDOWS 11 PRO</p>
+      <h1>Install Windows 11 Pro on EC2, without re-researching it next month.</h1>
+      <p class="lead">A complete, copy-paste guide built from a real, observed install — not a generic tutorial. Every command is in the order you run it, with what success looks like and what to do when it fails.</p>
+      <div class="hero-actions">
+        <a class="btn primary" href="#prereq">Start the guide →</a>
+        <a class="btn" href="#install">Jump to install</a>
+        <a class="btn" href="#troubleshoot">Troubleshooting</a>
+      </div>
+      <div class="callout warn"><strong>⚠ Destructive:</strong> the Windows install erases the entire main disk. Create an AMI backup in step 1 before you run anything in step 4.</div>
+      <div class="callout"><strong>✓ Tested run:</strong> Ubuntu 24.04, m7i-flex.large, ~76 GB disk, ISO Windows 11 Business Editions 26h2 x64, installed edition Pro, observed through “Installing Windows 11” at 49%. Final RDP login was not verified at guide build time — see Verification.</div>
+    </section>
+
+    <section id="overview" data-search="overview scope licensing">
+      <h2>Overview</h2>
+      <p><strong>Scope:</strong> this guide documents one setup only — a fresh Ubuntu 24.04 EC2 instance converted in place to Windows 11 Pro with <code>bin456789/reinstall</code>. It is not a guide to any other project.</p>
+      <p><strong>Licensing:</strong> the installer provides deployment only, not a Windows licence or activation. For personal testing use a time-limited Evaluation ISO. For production use an AWS Windows Server AMI (licence included) or a compliant Dedicated Host + Enterprise route. See Security.</p>
+      <p><strong>Time:</strong> 20–45 minutes for the Windows install itself, plus setup and verification.</p>
+    </section>
+
+    <section id="prereq" data-search="prerequisites instance type disk ram security group ami backup">
+      <h2>1 · Prerequisites</h2>
+      <ul>
+        <li>Instance: at least 2 vCPU / 8 GB RAM in practice (tested: m7i-flex.large, x86_64).</li>
+        <li>Root volume: at least 64 GB, 80 GB recommended. An 8 GB disk will fail.</li>
+        <li>AMI: Ubuntu Server 24.04 LTS (HVM), amd64. SSH user: <code>ubuntu</code>.</li>
+        <li>Key pair: a <code>.pem</code> you hold, with <code>chmod 400</code>.</li>
+        <li>Security group (your IP only, temporary): SSH 22, RDP 3389, HTTP 80.</li>
+      </ul>
+      <div class="codeblock"><button class="copy" data-copy="ssh -i ~/.ssh/YOUR_KEY.pem ubuntu@YOUR_PUBLIC_IP">Copy</button><pre><code>ssh -i ~/.ssh/YOUR_KEY.pem ubuntu@YOUR_PUBLIC_IP</code></pre></div>
+      <p>Success: Ubuntu 24.04 welcome text. <code>Permission denied (publickey)</code> means wrong key, wrong user, or wrong security group.</p>
+      <div class="callout warn"><strong>Backup first:</strong> EC2 Console → Instances → Actions → Images and templates → Create image. Note the AMI ID. Do not delete it until Windows is verified. Rollback is launching a new instance from that AMI — there is no in-place undo after the disk is erased.</div>
+    </section>
+
+    <section id="updates" data-search="updates apt curl packages">
+      <h2>2 · OS updates and essential packages</h2>
+      <div class="codeblock"><button class="copy" data-copy="sudo -i
+apt update
+apt upgrade -y
+apt install -y curl wget ca-certificates
+curl --version">Copy</button><pre><code>sudo -i
+apt update
+apt upgrade -y
+apt install -y curl wget ca-certificates
+curl --version</code></pre></div>
+      <p>Success: <code>curl</code> prints a version, no package errors.</p>
+    </section>
+
+    <section id="checks" data-search="checks disk ram architecture prerequisites script">
+      <h2>3 · Dependency and environment checks</h2>
+      <div class="codeblock"><button class="copy" data-copy="bash scripts/check-prerequisites.sh
+df -h /
+free -h
+uname -m">Copy</button><pre><code>bash scripts/check-prerequisites.sh
+df -h /
+free -h
+uname -m</code></pre></div>
+      <p>Expected: root about 64 GB or more, RAM about 7–8 GB on a large instance, <code>x86_64</code>. If disk is 8 GB, stop and relaunch with a larger volume.</p>
+    </section>
+
+    <section id="install" data-search="install reinstall windows 11 pro image lang username password rdp iso evaluation">
+      <h2>4 · Main installation — Windows 11</h2>
+      <p>The script auto-bypasses Windows 11 hardware limits (TPM/Secure Boot) and auto-installs AWS drivers (ENA network, NVMe storage, VMClock, PCI serial).</p>
+      <div class="codeblock"><button class="copy" data-copy="curl -O https://raw.githubusercontent.com/bin456789/reinstall/main/reinstall.sh
+ls -lh reinstall.sh">Copy</button><pre><code>curl -O https://raw.githubusercontent.com/bin456789/reinstall/main/reinstall.sh
+ls -lh reinstall.sh</code></pre></div>
+      <div class="codeblock"><button class="copy" data-copy="bash scripts/install-windows11.sh">Copy</button><pre><code>bash scripts/install-windows11.sh</code></pre></div>
+      <p>Or, directly (replace the placeholders — never use a real password in a document):</p>
+      <div class="codeblock"><button class="copy" data-copy="bash reinstall.sh windows --image-name &quot;Windows 11 Pro&quot; --lang en-us --username YOUR_WINDOWS_USERNAME --password 'YOUR_WINDOWS_PASSWORD' --rdp-port 3389 --allow-ping">Copy</button><pre><code>bash reinstall.sh windows \
+  --image-name "Windows 11 Pro" \
+  --lang en-us \
+  --username YOUR_WINDOWS_USERNAME \
+  --password 'YOUR_WINDOWS_PASSWORD' \
+  --rdp-port 3389 \
+  --allow-ping</code></pre></div>
+      <div class="callout"><strong>Password rule:</strong> at least 8 characters, upper + lower + digit + special, and it must not contain the username. A password containing the username is liable to be rejected by Windows policy.</div>
+      <div class="callout"><strong>Business Editions ≠ installed edition:</strong> the ISO file is named “Business Editions”, but the installer is told <code>finalos_image_name='windows 11 pro'</code>, so the installed edition is Pro. Verify it in step 12.</div>
+      <p>If automatic ISO lookup fails, use the README Evaluation method:</p>
+      <div class="codeblock"><button class="copy" data-copy="bash reinstall.sh windows --image-name &quot;Windows 11 Enterprise LTSC 2024 Evaluation&quot; --iso &quot;https://go.microsoft.com/fwlink/?linkid=2289029&quot;">Copy</button><pre><code>bash reinstall.sh windows \
+  --image-name "Windows 11 Enterprise LTSC 2024 Evaluation" \
+  --iso "https://go.microsoft.com/fwlink/?linkid=2289029"</code></pre></div>
+      <p>Cancel before reboot only: <code>bash reinstall.sh reset</code>. The script prints an INFO block and returns to the prompt — it does not reboot by itself.</p>
+    </section>
+
+    <section id="reboot" data-search="reboot stages diskpart aws nvme installing percentage">
+      <h2>5 · Reboot and installation stages</h2>
+      <div class="codeblock"><button class="copy" data-copy="reboot">Copy</button><pre><code>reboot</code></pre></div>
+      <p>SSH closing with “Connection reset by peer” is normal. Do not SSH back in.</p>
+      <ol>
+        <li>Console screenshot: <code>Booting 'reinstall (windows)'</code></li>
+        <li>Windows PE: <code>AWSNVMe.inf</code> loaded, DiskPart, <code>MININT-PC</code> (temporary PE name)</li>
+        <li><code>Installing Windows 11</code> — percentage rising, several automatic restarts</li>
+        <li>Windows login screen</li>
+      </ol>
+      <p>Wait 20–45 minutes. Check only the console screenshot and the installer WEB log printed in step 4. Do not press Cancel and do not stop the instance.</p>
+    </section>
+
+    <section id="rdp" data-search="rdp login username administrator port 3389">
+      <h2>6 · First RDP login</h2>
+      <ul>
+        <li>Computer: <code>YOUR_PUBLIC_IP:3389</code></li>
+        <li>Username: <code>.\YOUR_WINDOWS_USERNAME</code> (then bare username if that fails)</li>
+        <li>Password: the password from step 4</li>
+      </ul>
+      <p>If RDP fails, check the screenshot stage first — if the installer is still running, RDP cannot work yet. Then check the security group and IP.</p>
+    </section>
+
+    <section id="inside" data-search="inside windows device manager update drivers">
+      <h2>7 · Inside Windows — first setup</h2>
+      <ol>
+        <li>Change the Windows password immediately, especially if it was ever shared.</li>
+        <li>Device Manager: confirm Amazon Elastic Network Adapter and AWS NVMe Controller, with no warnings.</li>
+        <li>Run Windows Update until no important updates remain.</li>
+        <li>Set time zone, region, and keyboard. Enable Windows Firewall.</li>
+      </ol>
+    </section>
+
+    <section id="network" data-search="network firewall security group port 80 remove">
+      <h2>8 · Networking, ports, and firewall</h2>
+      <p>Remove HTTP 80. Restrict RDP 3389 to your IP (<code>/32</code>). Do not widen RDP to <code>0.0.0.0/0</code> as a shortcut. Full rules are in <code>examples/security-group.md</code>.</p>
+      <div class="codeblock"><button class="copy" data-copy="aws ec2 revoke-security-group-ingress --group-id sg-xxxxxxxx --protocol tcp --port 80 --cidr YOUR_IP/32">Copy</button><pre><code>aws ec2 revoke-security-group-ingress \
+  --group-id sg-xxxxxxxx \
+  --protocol tcp --port 80 --cidr YOUR_IP/32</code></pre></div>
+    </section>
+
+    <section id="services" data-search="services startup automatic boot">
+      <h2>9 · Background services and automatic startup</h2>
+      <p>Nothing extra is needed for a basic desktop: starting the instance starts Windows, and Windows starts its own RDP service. If you need a program on login, use Task Scheduler or the Startup folder, and document it so the next rebuild repeats it. Do not install an SSH server on Windows without a documented reason.</p>
+    </section>
+
+    <section id="security" data-search="security hardening password keys licensing">
+      <h2>10 · Security hardening</h2>
+      <ul>
+        <li>Password rotated after first login; RDP restricted to your IP; Windows Update current.</li>
+        <li>No <code>.pem</code>, password, or key in any file, screenshot, or repository.</li>
+        <li>Before imaging a Windows AMI, remove temporary passwords, test files, and downloads.</li>
+        <li>Full rules: <code>docs/SECURITY.md</code> in the repository.</li>
+      </ul>
+    </section>
+
+    <section id="backup" data-search="backup ami restore snapshot cost">
+      <h2>11 · Backup and restore</h2>
+      <div class="codeblock"><button class="copy" data-copy="bash scripts/backup-ami.sh
+bash scripts/restore-from-ami.sh">Copy</button><pre><code>bash scripts/backup-ami.sh
+bash scripts/restore-from-ami.sh</code></pre></div>
+      <p>Restore always means launching a new instance from an AMI, not repairing the old disk. Keep the known-good AMI until the new instance passes verification. Compute billing stops when an instance is stopped; EBS, AMI, and snapshot storage keep billing.</p>
+    </section>
+
+    <section id="verify" data-search="verification checklist edition drivers update firewall">
+      <h2>12 · Verification checklist</h2>
+      <p>Do not declare success until every row passes.</p>
+      <ul class="verify">
+        <li>Instance Running, status checks passed</li>
+        <li>Console screenshot shows Windows login screen, not the installer</li>
+        <li>RDP login as <code>.\YOUR_WINDOWS_USERNAME</code> succeeds</li>
+        <li>Settings → System → About: Edition is Windows 11 Pro</li>
+        <li>Device Manager: Amazon Elastic Network Adapter, no warning</li>
+        <li>Device Manager: AWS NVMe Controller, no warning</li>
+        <li>Internet works from inside RDP</li>
+        <li>Windows Update: no important updates pending</li>
+        <li>Security group: HTTP 80 removed, RDP restricted to your IP</li>
+        <li>A verified Windows AMI exists, named and dated</li>
+      </ul>
+    </section>
+
+    <section id="troubleshoot" data-search="troubleshooting ssh permission denied rdp stuck wrong edition driver boot">
+      <h2>13 · Troubleshooting</h2>
+      <p><strong>SSH Permission denied:</strong> wrong key, wrong user (<code>ubuntu</code>), or wrong security group. Key must be <code>chmod 400</code>.</p>
+      <p><strong>RDP will not connect:</strong> check screenshot stage, security group, Running state, and public (not private) IP, in that order.</p>
+      <p><strong>RDP login fails:</strong> try <code>.\username</code>, then bare username. Check the password does not contain the username.</p>
+      <p><strong>Stuck at a percentage:</strong> wait at least 45 minutes total. A slowly moving percentage is not stuck.</p>
+      <p><strong>Wrong edition / missing driver / will not boot:</strong> wrong edition needs a clean reinstall; a missing driver needs AWS drivers from AWS docs; a failed boot needs a restore from AMI. Full table: <code>docs/TROUBLESHOOTING.md</code>.</p>
+    </section>
+
+    <section id="remove" data-search="remove uninstall terminate delete ami snapshot reinstall clean">
+      <h2>14 · Removal and clean reinstallation</h2>
+      <div class="codeblock"><button class="copy" data-copy="bash scripts/uninstall.sh">Copy</button><pre><code>bash scripts/uninstall.sh</code></pre></div>
+      <p>Removal order: stop → optional final AMI → terminate → deregister AMI → delete snapshots → delete unattached volumes → rotate passwords/keys. Clean reinstallation starts again at step 1 with a fresh Ubuntu instance — do not reuse a half-installed Windows disk.</p>
+    </section>
+
+    <section id="faq" data-search="faq business editions pro free tier cost arm">
+      <h2>FAQ</h2>
+      <p><strong>Is Business Editions the same as Enterprise?</strong><br>No. It is the ISO file name. The installed edition is the one named by <code>--image-name</code>. Verify it in Settings → About.</p>
+      <p><strong>Is this free tier?</strong><br>No, in practice. A large class instance and a 64–80 GB disk are not free-tier sized. Stop the instance when idle and check current pricing.</p>
+      <p><strong>Can I use ARM / Graviton?</strong><br>Only with an ARM64 Windows ISO. This guide's commands are the x86_64 path, which was the tested path.</p>
+      <p><strong>Do I need API keys?</strong><br>No third-party API keys exist for this setup. Authentication is: AWS key pair for SSH, and Windows username/password for RDP. AWS CLI backup scripts use your normal AWS CLI configuration, not a key in this repo.</p>
+    </section>
+
+    <section id="refs" data-search="references github bin456789 aws microsoft">
+      <h2>References</h2>
+      <ul>
+        <li><a href="https://github.com/bin456789/reinstall" target="_blank" rel="noopener">bin456789/reinstall — GitHub repository and README</a></li>
+        <li><a href="https://docs.aws.amazon.com/ec2/" target="_blank" rel="noopener">AWS EC2 documentation</a></li>
+        <li><a href="https://learn.microsoft.com/en-us/windows/" target="_blank" rel="noopener">Microsoft Windows documentation</a></li>
+      </ul>
+      <p>Full Markdown source: <code>docs/INSTALLATION.md</code> in the repository. That file is the source of truth; this page mirrors it.</p>
+    </section>
+  </main>
+</div>
+<footer>
+  <p>EC2 Windows 11 Guide · Built from an observed install, Nov 2026 · No credentials are in this repository or site.</p>
+  <p>Repository link is added after the GitHub upload step — do not trust a live URL until it has been opened and checked.</p>
+</footer>
+<script src="app.js"></script>
+</body>
+</html>
